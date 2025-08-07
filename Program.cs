@@ -1,10 +1,6 @@
 ﻿// C:\Code\TcxStatsCalculator\PF 08-05-25.tcx
 // C:\Code\TcxStatsCalculator\PF 08-07-25.tcx
-using System;
-using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
-using System.Linq;
 using System.Xml.Linq;
 
 namespace TcxStatsCalculator
@@ -24,34 +20,33 @@ namespace TcxStatsCalculator
 
             try
             {
-                var (heartRates, cadences, powers, speeds, times, distances) = ParseTcx(path);
+                var (heartRates, cadences, powers, speeds, times, distances, altitudes) = ParseTcx(path);
 
                 PrintStats("Heart Rate", heartRates, "bpm");
                 PrintStats("Cadence", cadences, "rpm");
                 PrintStats("Power", powers, "watts");
 
-                // Calculate average speed using total distance / total time
-                double avgSpeed = CalculateAverageSpeed(times, distances); // mph
-                double speedStdDev = speeds.Count > 0 ? StdDev(speeds) : 0.0;
+				// Calculate average speed using total distance / total time
+				double avgSpeed = CalculateAverageSpeed(times, distances); // mph
+				var segmentSpeeds = CalculateSegmentSpeeds(times, distances, 5.0);
 
-                if (avgSpeed > 0)
-                {
-                    Console.WriteLine($"Speed: Avg = {avgSpeed:F2} mph, StdDev = {speedStdDev:F2} mph (n={speeds.Count})");
-                }
-                else
-                {
-                    Console.WriteLine("Speed: No data");
-                }
-
-                // Calculate and display segment speeds, ignoring segments < 5 mph
-                var segmentSpeeds = CalculateSegmentSpeeds(times, distances, 5.0);
+				if (avgSpeed > 0 && segmentSpeeds.Count > 0)
+				{
+					double speedStdDev = StdDev(segmentSpeeds);
+					Console.WriteLine($"Speed: Avg = {avgSpeed:F2} mph, StdDev = {speedStdDev:F2} mph (n={segmentSpeeds.Count})");
+				}
+				else
+				{
+					Console.WriteLine("Speed: No data");
+				}
+				// Calculate and display segment speeds, ignoring segments < 5 mph
                 if (segmentSpeeds.Count > 0)
                 {
-                    Console.WriteLine("\nSegment Speeds (mph, ignoring < 5 mph):");
-                    for (int i = 0; i < segmentSpeeds.Count; i++)
-                    {
-                        Console.WriteLine($"  Segment {i + 1}: {segmentSpeeds[i]:F2} mph");
-                    }
+                    //Console.WriteLine("\nSegment Speeds (mph, ignoring < 5 mph):");
+                    //for (int i = 0; i < segmentSpeeds.Count; i++)
+                    //{
+                    //    Console.WriteLine($"  Segment {i + 1}: {segmentSpeeds[i]:F2} mph");
+                    //}
                     double segAvg = segmentSpeeds.Average();
                     double segStd = StdDev(segmentSpeeds);
                     Console.WriteLine($"\nSegment Speed Stats: Avg = {segAvg:F2} mph, StdDev = {segStd:F2} mph, Min = {segmentSpeeds.Min():F2} mph, Max = {segmentSpeeds.Max():F2} mph");
@@ -60,6 +55,11 @@ namespace TcxStatsCalculator
                 {
                     Console.WriteLine("No segment speeds >= 5 mph could be calculated.");
                 }
+
+                // Calculate and display total elevation change in feet
+                double totalElevationChangeFeet = CalculateTotalElevationChangeInFeet(altitudes);
+                Console.WriteLine($"\nTotal Elevation Change: {totalElevationChangeFeet:F2} feet");
+
             }
             catch (Exception ex)
             {
@@ -67,7 +67,8 @@ namespace TcxStatsCalculator
             }
         }
 
-        static (List<double> heartRates, List<double> cadences, List<double> powers, List<double> speeds, List<DateTime> times, List<double> distances) ParseTcx(string path)
+        static (List<double> heartRates, List<double> cadences, List<double> powers, List<double> speeds, List<DateTime> times, List<double> distances, List<double> altitudes)
+            ParseTcx(string path)
         {
             var doc = XDocument.Load(path);
 
@@ -82,6 +83,7 @@ namespace TcxStatsCalculator
             var speeds = new List<double>();
             var times = new List<DateTime>();
             var distances = new List<double>();
+            var altitudes = new List<double>();
 
             foreach (var tp in trackpoints)
             {
@@ -123,9 +125,14 @@ namespace TcxStatsCalculator
                 var distElem = tp.Element(ns + "DistanceMeters");
                 if (distElem != null && double.TryParse(distElem.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double distVal))
                     distances.Add(distVal);
+
+                // Altitude
+                var altElem = tp.Element(ns + "AltitudeMeters");
+                if (altElem != null && double.TryParse(altElem.Value, NumberStyles.Float, CultureInfo.InvariantCulture, out double altVal))
+                    altitudes.Add(altVal);
             }
 
-            return (heartRates, cadences, powers, speeds, times, distances);
+            return (heartRates, cadences, powers, speeds, times, distances, altitudes);
         }
 
         static void PrintStats(string label, List<double> values, string unit)
@@ -196,6 +203,22 @@ namespace TcxStatsCalculator
                 }
             }
             return segmentSpeeds;
+        }
+
+        /// <summary>
+        /// Calculates total elevation change (sum of all positive and negative changes) in feet.
+        /// </summary>
+        static double CalculateTotalElevationChangeInFeet(List<double> altitudes)
+        {
+            if (altitudes == null || altitudes.Count < 2)
+                return 0.0;
+
+            double totalChangeMeters = 0.0;
+            for (int i = 1; i < altitudes.Count; i++)
+            {
+                totalChangeMeters += Math.Abs(altitudes[i] - altitudes[i - 1]);
+            }
+            return totalChangeMeters * 3.28084; // convert meters to feet
         }
     }
 }
