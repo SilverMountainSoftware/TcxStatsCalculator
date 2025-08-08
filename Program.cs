@@ -1,6 +1,10 @@
-﻿// C:\Code\TcxStatsCalculator\PF 08-05-25.tcx
-// C:\Code\TcxStatsCalculator\PF 08-07-25.tcx
+﻿// C:\Code\TcxStatsCalculator\Data\PF 08-05-25.tcx
+// C:\Code\TcxStatsCalculator\Data\PF 08-07-25.tcx
+using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
+using System.Linq;
 using System.Xml.Linq;
 
 namespace TcxStatsCalculator
@@ -26,27 +30,28 @@ namespace TcxStatsCalculator
                 PrintStats("Cadence", cadences, "rpm");
                 PrintStats("Power", powers, "watts");
 
-				// Calculate average speed using total distance / total time
-				double avgSpeed = CalculateAverageSpeed(times, distances); // mph
-				var segmentSpeeds = CalculateSegmentSpeeds(times, distances, 5.0);
+                // Calculate average speed using total distance / total time
+                double avgSpeed = CalculateAverageSpeed(times, distances); // mph
+                var segmentSpeeds = CalculateSegmentSpeeds(times, distances, 5.0);
 
-				if (avgSpeed > 0 && segmentSpeeds.Count > 0)
-				{
-					double speedStdDev = StdDev(segmentSpeeds);
-					Console.WriteLine($"Speed: Avg = {avgSpeed:F2} mph, StdDev = {speedStdDev:F2} mph (n={segmentSpeeds.Count})");
-				}
-				else
-				{
-					Console.WriteLine("Speed: No data");
-				}
-				// Calculate and display segment speeds, ignoring segments < 5 mph
+                if (avgSpeed > 0 && segmentSpeeds.Count > 0)
+                {
+                    double speedStdDev = StdDev(segmentSpeeds);
+                    Console.WriteLine($"Speed: Avg = {avgSpeed:F2} mph, StdDev = {speedStdDev:F2} mph (n={segmentSpeeds.Count})");
+                }
+                else
+                {
+                    Console.WriteLine("Speed: No data");
+                }
+
+                // Calculate and display segment speeds, ignoring segments < 5 mph
                 if (segmentSpeeds.Count > 0)
                 {
-                    //Console.WriteLine("\nSegment Speeds (mph, ignoring < 5 mph):");
-                    //for (int i = 0; i < segmentSpeeds.Count; i++)
-                    //{
-                    //    Console.WriteLine($"  Segment {i + 1}: {segmentSpeeds[i]:F2} mph");
-                    //}
+                    ////Console.WriteLine("\nSegment Speeds (mph, ignoring < 5 mph):");
+                    ////for (int i = 0; i < segmentSpeeds.Count; i++)
+                    ////{
+                    ////    Console.WriteLine($"  Segment {i + 1}: {segmentSpeeds[i]:F2} mph");
+                    ////}
                     double segAvg = segmentSpeeds.Average();
                     double segStd = StdDev(segmentSpeeds);
                     Console.WriteLine($"\nSegment Speed Stats: Avg = {segAvg:F2} mph, StdDev = {segStd:F2} mph, Min = {segmentSpeeds.Min():F2} mph, Max = {segmentSpeeds.Max():F2} mph");
@@ -60,6 +65,15 @@ namespace TcxStatsCalculator
                 double totalElevationChangeFeet = CalculateTotalElevationChangeInFeet(altitudes);
                 Console.WriteLine($"\nTotal Elevation Change: {totalElevationChangeFeet:F2} feet");
 
+                // Calculate and display time spent in each power group
+                var powerGroupTimes = CalculatePowerGroupTimes(times, powers);
+                Console.WriteLine("\nTime Spent in Power Groups:");
+                foreach (var kvp in powerGroupTimes)
+                {
+                    string groupLabel = kvp.Key;
+                    TimeSpan ts = TimeSpan.FromSeconds(kvp.Value);
+                    Console.WriteLine($"  {groupLabel} W: {ts:hh\\:mm\\:ss}");
+                }
             }
             catch (Exception ex)
             {
@@ -219,6 +233,45 @@ namespace TcxStatsCalculator
                 totalChangeMeters += Math.Abs(altitudes[i] - altitudes[i - 1]);
             }
             return totalChangeMeters * 3.28084; // convert meters to feet
+        }
+
+        /// <summary>
+        /// Calculates the total time spent in each power group (e.g., 0-50W, 51-100W, etc.).
+        /// </summary>
+        static Dictionary<string, double> CalculatePowerGroupTimes(List<DateTime> times, List<double> powers)
+        {
+            var groupTimes = new Dictionary<string, double>();
+
+            if (times.Count < 2 || powers.Count < 2)
+                return groupTimes;
+
+            // Build power group boundaries: 0-50, 51-100, 101-150, ..., up to the max value in powers
+            double maxPower = powers.Max();
+            var groupRanges = new List<(int min, int max)>();
+            for (int min = 0, max = 50; min <= maxPower; min = max + 1, max += 50)
+                groupRanges.Add((min, max));
+
+            // Accumulate time spent in each group
+            for (int i = 1; i < times.Count && i < powers.Count; i++)
+            {
+                double p = powers[i];
+                double segmentTime = (times[i] - times[i - 1]).TotalSeconds;
+                if (segmentTime <= 0)
+                    continue;
+
+                foreach (var (min, max) in groupRanges)
+                {
+                    if (p >= min && p <= max)
+                    {
+                        string label = $"{min}-{max}";
+                        if (!groupTimes.ContainsKey(label))
+                            groupTimes[label] = 0;
+                        groupTimes[label] += segmentTime;
+                        break;
+                    }
+                }
+            }
+            return groupTimes;
         }
     }
 }
